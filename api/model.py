@@ -9,7 +9,6 @@ from torch.utils.data import TensorDataset, DataLoader, RandomSampler, Sequentia
 from io import StringIO
 from unicodedata import category
 from markdown import markdown
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score,classification_report
 from torch.utils.data import DataLoader, RandomSampler
 from transformers import (
@@ -44,7 +43,32 @@ MODELS = [(BertForSequenceClassification,BertTokenizer,'bert-base-cased'),
           (AlbertForSequenceClassification, AlbertTokenizer,'albert-base-v1')
         ]
 
-def train_model(train_df, model_save_path, model_task, model_tokenizer, model_name):
+def build_dataset(df, tokenizer):
+    """
+    Prepares the dataset for training or evaluation by tokenizing the text and creating attention masks.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing the text data and labels.
+        tokenizer (transformers.PreTrainedTokenizer): Tokenizer to use for encoding the text.
+    """
+    labels = df['polarity']
+    
+    enc = tokenizer(
+        df['text'].tolist(),
+        truncation=True,
+        padding='max_length',
+        max_length=MAX_LEN,
+        return_tensors='pt',
+        return_attention_mask=True
+    )
+
+    return TensorDataset(
+        enc['input_ids'],
+        enc['attention_mask'],
+        torch.tensor(labels.values)
+    )
+
+def train_model(train_df, val_df, model_save_path, model_task, model_tokenizer, model_name):
     """
     Trains a sentiment classification model on the provided dataset.
 
@@ -60,11 +84,17 @@ def train_model(train_df, model_save_path, model_task, model_tokenizer, model_na
     """
     seed_torch(42)
 
+    train_df['polarity'] = train_df['polarity'].replace({'neutral': 0, 'positive': 1, 'negative': 2})
 
-    train_df['polarity'] = train_df['polarity'].replace({'positive': 1, 'negative': 2, 'neutral': 0})
-    
     tokenizer = model_tokenizer.from_pretrained(model_name, do_lower_case=True)
 
+    train_data = build_dataset(train_df, tokenizer)
+    val_data = build_dataset(val_df, tokenizer)
+
+    train_dataloader = DataLoader(train_data, sampler=RandomSampler(train_data), batch_size=BATCH_SIZE)
+    val_dataloader = DataLoader(val_data, sampler=SequentialSampler(val_data), batch_size=BATCH_SIZE)
+
+    """
     sentences = train_df.text.values
     labels = train_df.polarity.values
 
@@ -95,7 +125,7 @@ def train_model(train_df, model_save_path, model_task, model_tokenizer, model_na
     train_masks, val_masks, _, _ = train_test_split(
         attention_masks, labels, test_size=0.1, random_state=42
     )
-
+    
     train_data = TensorDataset(train_inputs, train_masks, train_labels)
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=BATCH_SIZE)
@@ -103,7 +133,8 @@ def train_model(train_df, model_save_path, model_task, model_tokenizer, model_na
     val_data = TensorDataset(val_inputs, val_masks, val_labels)
     val_sampler = SequentialSampler(val_data)
     val_dataloader = DataLoader(val_data, sampler=val_sampler, batch_size=BATCH_SIZE)
-
+    """
+    
     # Use passed-in model_task and model_name
     model = model_task.from_pretrained(model_name, num_labels=3)
     model.to(device)
